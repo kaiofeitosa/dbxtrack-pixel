@@ -1,58 +1,79 @@
 (function() {
-  console.log("dbxtrack-pixel: Initializing...");
+  console.log("dbxtrack-pixel: Initializing (Advanced Mode)...");
 
-  // Captura os parâmetros da URL da página
   const pageParams = new URLSearchParams(window.location.search);
   const queryString = pageParams.toString();
 
   if (!queryString) {
-    console.log("dbxtrack-pixel: No query parameters found. Script idle.");
+    console.log("dbxtrack-pixel: No query parameters found.");
     return;
   }
 
-  console.log("dbxtrack-pixel: Captured query string:", queryString);
+  console.log("dbxtrack-pixel: Query string:", queryString);
 
-  // Função para atualizar links do WhatsApp
-  function updateWhatsAppLinks() {
-    // Busca links não processados ainda
-    const redirectLinks = document.querySelectorAll('a[href*="/whatsapp/"]:not([data-dbx-tracked])');
-    
-    if (redirectLinks.length === 0) return;
+  // Função auxiliar para adicionar parâmetros a uma URL
+  function addParamsToUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (!url.includes('/whatsapp/') && !url.includes('wa.me') && !url.includes('api.whatsapp.com')) {
+      return url;
+    }
 
-    console.log(`dbxtrack-pixel: Found ${redirectLinks.length} new link(s) to update.`);
-
-    redirectLinks.forEach(link => {
-      const originalHref = link.href;
-      
-      if (!originalHref) {
-        console.warn("dbxtrack-pixel: Link without href found.", link);
-        return;
-      }
-
-      // Adiciona os parâmetros
-      const separator = originalHref.includes('?') ? '&' : '?';
-      const finalHref = `${originalHref}${separator}${queryString}`;
-      
-      link.href = finalHref;
-      link.setAttribute('data-dbx-tracked', 'true'); // Marca para não processar novamente
-      
-      console.log("dbxtrack-pixel: Link updated →", finalHref);
-    });
+    const separator = url.includes('?') ? '&' : '?';
+    const newUrl = `${url}${separator}${queryString}`;
+    console.log("dbxtrack-pixel: URL interceptada e atualizada:", newUrl);
+    return newUrl;
   }
 
-  // Executa imediatamente para links já existentes
+  // 1️⃣ Atualiza links <a> existentes e novos (modais, etc)
+  function updateWhatsAppLinks() {
+    const links = document.querySelectorAll('a[href*="/whatsapp/"]:not([data-dbx-tracked]), a[href*="wa.me"]:not([data-dbx-tracked]), a[href*="api.whatsapp.com"]:not([data-dbx-tracked])');
+    
+    links.forEach(link => {
+      if (!link.href) return;
+      
+      link.href = addParamsToUrl(link.href);
+      link.setAttribute('data-dbx-tracked', 'true');
+    });
+
+    if (links.length > 0) {
+      console.log(`dbxtrack-pixel: Updated ${links.length} link(s).`);
+    }
+  }
+
   updateWhatsAppLinks();
 
-  // Observa o DOM para capturar links criados dinamicamente (modais, etc)
-  const observer = new MutationObserver(function(mutations) {
-    updateWhatsAppLinks();
+  const observer = new MutationObserver(updateWhatsAppLinks);
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // 2️⃣ Intercepta window.location (redirecionamentos diretos)
+  const originalLocation = window.location.href;
+  let locationSetter = Object.getOwnPropertyDescriptor(window.Location.prototype, 'href').set;
+
+  Object.defineProperty(window.Location.prototype, 'href', {
+    set: function(url) {
+      const modifiedUrl = addParamsToUrl(url);
+      locationSetter.call(this, modifiedUrl);
+    }
   });
 
-  // Inicia observação
-  observer.observe(document.body, {
-    childList: true,    // Observa adição/remoção de elementos
-    subtree: true       // Observa toda a árvore DOM
-  });
+  console.log("dbxtrack-pixel: Intercepting window.location redirects...");
 
-  console.log("dbxtrack-pixel: Active and monitoring for dynamic content.");
+  // 3️⃣ Intercepta window.open (popups/novas abas)
+  const originalOpen = window.open;
+  window.open = function(url, ...args) {
+    const modifiedUrl = addParamsToUrl(url);
+    console.log("dbxtrack-pixel: window.open interceptado:", modifiedUrl);
+    return originalOpen.call(this, modifiedUrl, ...args);
+  };
+
+  // 4️⃣ Intercepta clicks em links (evento)
+  document.addEventListener('click', function(e) {
+    const link = e.target.closest('a');
+    if (link && link.href && !link.getAttribute('data-dbx-tracked')) {
+      link.href = addParamsToUrl(link.href);
+      link.setAttribute('data-dbx-tracked', 'true');
+    }
+  }, true);
+
+  console.log("dbxtrack-pixel: Full protection active ✓");
 })();
